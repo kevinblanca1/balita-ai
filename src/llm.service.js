@@ -1,11 +1,60 @@
 import OpenAI from 'openai';
 
-const DEFAULT_MODEL = process.env.OPENAI_MODEL ?? 'gpt-4o-mini';
+/**
+ * Supported LLM backends. All four speak the OpenAI Chat Completions wire
+ * format, so we use the same `openai` SDK for every one and only vary the
+ * `baseURL`, credential, and default model.
+ */
+const PROVIDERS = {
+  openai: {
+    baseURL: undefined, // SDK default (api.openai.com)
+    keyEnv: 'OPENAI_API_KEY',
+    defaultModel: 'gpt-4o-mini',
+  },
+  gemini: {
+    baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    keyEnv: 'GEMINI_API_KEY',
+    defaultModel: 'gemini-2.0-flash',
+  },
+  openrouter: {
+    baseURL: 'https://openrouter.ai/api/v1',
+    keyEnv: 'OPENROUTER_API_KEY',
+    defaultModel: 'openai/gpt-4o-mini',
+  },
+  ollama: {
+    // Resolved against OLLAMA_BASE_URL in the constructor (read at runtime).
+    baseURL: 'http://localhost:11434/v1',
+    keyEnv: null, // local; no auth. The SDK still needs a non-empty key.
+    defaultModel: 'llama3.1',
+  },
+};
 
-export class OpenAiService {
+export class LlmService {
   constructor() {
-    this.client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-    this.model = DEFAULT_MODEL;
+    const provider = (process.env.LLM_PROVIDER ?? 'openai').toLowerCase();
+    const cfg = PROVIDERS[provider];
+    if (!cfg) {
+      throw new Error(
+        `Unknown LLM_PROVIDER "${provider}". Valid values: ${Object.keys(PROVIDERS).join(', ')}.`,
+      );
+    }
+
+    // Ollama needs no key, but the OpenAI SDK requires a non-empty string.
+    const apiKey = cfg.keyEnv ? process.env[cfg.keyEnv] : 'ollama';
+    if (cfg.keyEnv && !apiKey) {
+      throw new Error(`LLM_PROVIDER=${provider} requires ${cfg.keyEnv} to be set.`);
+    }
+
+    // Only pass baseURL when the provider overrides the SDK default.
+    // Ollama's endpoint is configurable via OLLAMA_BASE_URL.
+    const baseURL =
+      provider === 'ollama' ? process.env.OLLAMA_BASE_URL ?? cfg.baseURL : cfg.baseURL;
+    const options = { apiKey };
+    if (baseURL) options.baseURL = baseURL;
+
+    this.client = new OpenAI(options);
+    this.provider = provider;
+    this.model = process.env.LLM_MODEL ?? cfg.defaultModel;
   }
 
   /**

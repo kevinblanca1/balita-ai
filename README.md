@@ -1,28 +1,31 @@
 # balita-ai
 
 An AI news summarizer. It crawls RSS feeds, trims each article to keep token
-usage low, and asks OpenAI to turn them into a short, scannable digest. Intended
-to run on a cron (morning / noon / night).
+usage low, and asks an LLM (OpenAI, Google Gemini, OpenRouter, or a local Ollama
+model) to turn them into a short, scannable digest. Intended to run on a cron
+(morning / noon / night).
 
 > *balita* — Filipino for "news."
 
 ## How it works
 
 ```
-RSS feed  ──▶  RssService  ──▶  OpenAiService  ──▶  digest
-(Manila Times)   fetch + trim      summarize        (bulleted briefing)
+RSS feed  ──▶  RssService  ──▶  LlmService  ──▶  digest
+(Manila Times)   fetch + trim     summarize      (bulleted briefing)
 ```
 
 1. `**RssService**` fetches a feed, normalizes each item, trims the body,
   drops empty items, sorts newest-first, and keeps the 10 newest.
-2. `**OpenAiService**` summarizes those articles into a bulleted briefing, and
+2. `**LlmService**` summarizes those articles into a bulleted briefing, and
   can also map a free-form query (e.g. *"what's the latest in sports?"*) to a
-   known section.
+   known section. It talks to your chosen provider (OpenAI, Gemini, OpenRouter,
+   or Ollama) through one OpenAI-compatible client.
 
 ## Requirements
 
 - Node `v22.19.0` (see `.nvmrc` — run `nvm use`)
-- An OpenAI API key
+- An API key for your chosen provider (OpenAI, Gemini, or OpenRouter), **or** a
+  running local [Ollama](https://ollama.com) — no key needed
 
 ## Setup
 
@@ -31,12 +34,31 @@ nvm use
 pnpm install        # or: npm install
 ```
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root (see `.env.example`):
 
 ```bash
-OPENAI_API_KEY=sk-...        # required
-OPENAI_MODEL=gpt-4o-mini     # optional, defaults to gpt-4o-mini
+# Pick a backend, then set only that provider's key.
+LLM_PROVIDER=openai          # openai | gemini | openrouter | ollama
+# LLM_MODEL=                 # optional; falls back to the provider default below
+
+OPENAI_API_KEY=sk-...        # for LLM_PROVIDER=openai
+GEMINI_API_KEY=              # for LLM_PROVIDER=gemini
+OPENROUTER_API_KEY=          # for LLM_PROVIDER=openrouter
+# OLLAMA_BASE_URL=http://localhost:11434/v1   # for LLM_PROVIDER=ollama (optional)
 ```
+
+Only the selected provider's key is required. Ollama needs no key — just a
+running local server (`ollama serve`) with the model pulled.
+
+| Provider     | `LLM_PROVIDER` | Key / setup                          | Base URL                                                 | Default model         |
+| ------------ | -------------- | ------------------------------------ | -------------------------------------------------------- | --------------------- |
+| OpenAI       | `openai`       | `OPENAI_API_KEY`                     | *(SDK default)*                                          | `gpt-4o-mini`         |
+| Google Gemini| `gemini`       | `GEMINI_API_KEY`                     | `https://generativelanguage.googleapis.com/v1beta/openai/` | `gemini-2.0-flash`  |
+| OpenRouter   | `openrouter`   | `OPENROUTER_API_KEY`                 | `https://openrouter.ai/api/v1`                           | `openai/gpt-4o-mini`  |
+| Ollama       | `ollama`       | local server; `OLLAMA_BASE_URL` opt. | `http://localhost:11434/v1`                              | `llama3.1`            |
+
+All four are OpenAI-wire-compatible, so balita-ai uses the single `openai` SDK
+for every one — only the base URL, key, and model change.
 
 ## Usage
 
@@ -63,9 +85,17 @@ Add or remove entries as needed. If you use `resolveIntent`, pass it the same
 section names you define here — otherwise a resolved section may not exist and
 `fetchSection` will throw `Unknown section`.
 
-### Model
+### Provider & model
 
-Set `OPENAI_MODEL` in `.env` to override the default (`gpt-4o-mini`).
+`LLM_PROVIDER` selects the backend (`openai` | `gemini` | `openrouter` | `ollama`),
+defaulting to `openai`. `LLM_MODEL` overrides the model; when unset, the selected
+provider's default from the table above is used.
+
+> Migration note: the old `OPENAI_MODEL` variable is now `LLM_MODEL`. Rename it in
+> your `.env` if you were setting it.
+
+For OpenRouter, models use the `vendor/model` form, e.g. `LLM_MODEL=openai/gpt-4o-mini`
+or `LLM_MODEL=google/gemini-2.0-flash-001`.
 
 ## Why we trim article bodies
 
@@ -183,7 +213,7 @@ zero hallucination risk — it's the publisher's own words.
 src/
   index.js           entry point — fetch + summarize + post
   rss.service.js     RssService: fetch, normalize, trim, sort, top-10
-  openai.service.js  OpenAiService: generateDigest, resolveIntent
+  llm.service.js     LlmService: generateDigest, resolveIntent (multi-provider)
   slack.service.js   SlackService: postDigest (hero image, no auto-unfurl)
 ```
 

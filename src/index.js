@@ -1,10 +1,10 @@
 import 'dotenv/config';
 import { RssService } from './rss.service.js';
-import { OpenAiService } from './openai.service.js';
+import { LlmService } from './llm.service.js';
 import { SlackService } from './slack.service.js';
 
 const rss = new RssService();
-const ai = new OpenAiService();
+const ai = new LlmService();
 const slack = new SlackService();
 
 async function main() {
